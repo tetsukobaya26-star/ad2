@@ -31,15 +31,16 @@ jobs:
     - name: Run Playwright script
       run: python scrape_ads.py
 
-    - name: Commit and Push retrieved CSV
+　　- name: Commit and Push retrieved CSV
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        if [ -d "data" ]; then
-          git add data/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Scraped Meta ads data [skip ci]" && git push)
+        git add data/
+        if ! git diff --staged --quiet; then
+          git commit -m "Auto-update: Scraped Meta ads data [skip ci]"
+          git push
         else
-          echo "No new data directory to commit."
+          echo "No changes to commit."
         fi
         # 変更（作成されたファイル）があるかチェック
         if [ -d "data" ]; then
