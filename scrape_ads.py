@@ -5,17 +5,19 @@ from datetime import datetime
 import pandas as pd
 from playwright.async_api import async_playwright
 
-# ---------------------------------------------------------
-# 検索条件の設定（日本国内限定）
-# ---------------------------------------------------------
-KEYWORD = "Tiktok18"  # 完全一致で検索したいキーワード
-COUNTRY = "JP"        # 対象国: 日本 (Japan)
+KEYWORD = "Tiktok18"
+COUNTRY = "JP"
 
 async def main():
     async with async_playwright() as p:
+        # ボット検出を回避するための引数を追加
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ]
         )
         
         context = await browser.new_context(
@@ -24,7 +26,14 @@ async def main():
             timezone_id="Asia/Tokyo",
             viewport={"width": 1280, "height": 800}
         )
+        
+        # automation検出を回避するスクリプトを注入
         page = await context.new_page()
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
 
         exact_keyword = f'"{KEYWORD}"'
         encoded_keyword = urllib.parse.quote(exact_keyword)
@@ -37,12 +46,18 @@ async def main():
         except Exception as e:
             print(f"ページ読み込み警告: {e}")
 
-        await page.wait_for_timeout(6000)
+        # 広告要素または「結果なし」が表示されるまで待機（最大15秒）
+        try:
+            await page.wait_for_selector('div[role="region"], div[class*="xh8ye4b"]', timeout=15000)
+        except Exception:
+            print("要素の読み込みタイムアウト。そのままスクロール処理を実行します。")
 
+        # スクロールしてコンテンツをロード
         for _ in range(4):
             await page.evaluate("window.scrollBy(0, 1500)")
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(2500)
 
+        # 広告カードの抽出
         ad_cards = await page.query_selector_all('div[class*="xh8ye4b"]')
         if not ad_cards:
             ad_cards = await page.query_selector_all('div:has-text("ID:")')
@@ -98,7 +113,7 @@ async def main():
 
         await browser.close()
 
-        # CSVへ保存（日ごとフォルダ ＋ 時刻別ファイル名）
+        # CSVへ保存
         if ads_data:
             now = datetime.now()
             today_str = now.strftime("%Y-%m-%d")
@@ -107,7 +122,6 @@ async def main():
             output_dir = os.path.join("data", today_str)
             os.makedirs(output_dir, exist_ok=True)
 
-            # ファイル名に時刻を挿入（例: data/2026-09-16/meta_ads_1400.csv）
             file_path = os.path.join(output_dir, f"meta_ads_{time_str}.csv")
             
             df = pd.DataFrame(ads_data)
