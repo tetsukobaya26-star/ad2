@@ -1,5 +1,7 @@
 import asyncio
+import os
 import urllib.parse
+from datetime import datetime
 import pandas as pd
 from playwright.async_api import async_playwright
 
@@ -16,7 +18,6 @@ async def main():
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         
-        # 日本国内の標準的なブラウザ環境（言語・タイムゾーン・ロケール）をシミュレート
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             locale="ja-JP",
@@ -25,11 +26,9 @@ async def main():
         )
         page = await context.new_page()
 
-        # 完全一致用にキーワードをダブルクォーテーションで囲む
         exact_keyword = f'"{KEYWORD}"'
         encoded_keyword = urllib.parse.quote(exact_keyword)
 
-        # 【日本国内限定】 country=JP および ad_type=all を指定したURLを直接構築
         url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={COUNTRY}&q={encoded_keyword}&sort_data[direction]=desc&sort_data[mode]=relevance_monthly_grouped&search_type=keyword_exact_phrase&media_type=all"
         print(f"アクセス中 (日本国内・完全一致): {url}")
         
@@ -38,15 +37,12 @@ async def main():
         except Exception as e:
             print(f"ページ読み込み警告: {e}")
 
-        # 動的要素と広告カードの初期描画を待機
         await page.wait_for_timeout(6000)
 
-        # 画面をスクロールして広告を追加読み込み
         for _ in range(4):
             await page.evaluate("window.scrollBy(0, 1500)")
             await page.wait_for_timeout(2000)
 
-        # 広告カード要素の取得
         ad_cards = await page.query_selector_all('div[class*="xh8ye4b"]')
         if not ad_cards:
             ad_cards = await page.query_selector_all('div:has-text("ID:")')
@@ -59,7 +55,6 @@ async def main():
 
         for card in ad_cards:
             try:
-                # 1. テキスト情報の取得
                 text_content = await card.inner_text()
                 if not text_content.strip():
                     continue
@@ -73,11 +68,9 @@ async def main():
                         ad_id = line
                         break
 
-                # 2. 広告画像・動画サムネイルURLの取得
                 img_element = await card.query_selector('img[src*="fbcdn"], img[src*="scontent"]')
                 image_url = await img_element.get_attribute("src") if img_element else "なし"
 
-                # 3. 遷移先URL（LPリンク）の抽出（MetaのリダイレクトURLを本来の直URLに復元）
                 link_url = "なし"
                 links = await card.query_selector_all('a[href]')
                 for link in links:
@@ -105,13 +98,22 @@ async def main():
 
         await browser.close()
 
-        # CSVへ保存
+        # CSVへ保存（日ごとフォルダを作成）
         if ads_data:
+            # 日付（YYYY-MM-DD）のフォルダパスを作成
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            output_dir = os.path.join("data", today_str)
+            os.makedirs(output_dir, exist_ok=True)
+
+            # フォルダ内に保存するファイルパスを設定
+            file_path = os.path.join(output_dir, "meta_ads_scraped.csv")
+            
             df = pd.DataFrame(ads_data)
-            df.to_csv("meta_ads_scraped.csv", index=False, encoding="utf-8-sig")
-            print(f"正常に保存完了: meta_ads_scraped.csv ({len(ads_data)}件)")
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+            print(f"正常に保存完了: {file_path} ({len(ads_data)}件)")
         else:
             print("該当する日本国内の広告データが取得できませんでした。")
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
