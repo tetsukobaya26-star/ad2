@@ -98,15 +98,17 @@ async def main():
 
         await browser.close()
 
-        # CSVへ保存（日ごとフォルダを作成）
+        # CSVへ保存（日ごとフォルダ ＋ 時刻別ファイル名）
         if ads_data:
-            # 日付（YYYY-MM-DD）のフォルダパスを作成
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H%M")
+            
             output_dir = os.path.join("data", today_str)
             os.makedirs(output_dir, exist_ok=True)
 
-            # フォルダ内に保存するファイルパスを設定
-            file_path = os.path.join(output_dir, "meta_ads_scraped.csv")
+            # ファイル名に時刻を挿入（例: data/2026-09-16/meta_ads_1400.csv）
+            file_path = os.path.join(output_dir, f"meta_ads_{time_str}.csv")
             
             df = pd.DataFrame(ads_data)
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
@@ -116,4 +118,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
