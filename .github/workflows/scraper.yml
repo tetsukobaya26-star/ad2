@@ -2,8 +2,8 @@ name: Meta Ads Playwright Scraper
 
 on:
   schedule:
-    # 毎日 日本時間 09:00 (UTC 00:00) に自動実行
-    - cron: '0 0 * * *'
+    # 毎時0分（1時間ごと）に自動実行
+    - cron: '0 * * * *'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
@@ -35,5 +35,5 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add *.csv
+        git add data/
         git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Scraped Meta ads data [skip ci]" && git push)
