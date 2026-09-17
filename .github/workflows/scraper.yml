@@ -3,7 +3,7 @@ name: Meta Ads Playwright Scraper
 on:
   schedule:
     # 毎時0分（1時間ごと）に自動実行
-    - cron: '0 * * * *'
+    - cron: '1 * * * *'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
