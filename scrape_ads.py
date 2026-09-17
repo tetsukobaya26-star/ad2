@@ -1,12 +1,15 @@
 import asyncio
 import os
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 from playwright.async_api import async_playwright
 
 KEYWORD = "Tiktok18"
 COUNTRY = "JP"
+
+# 日本標準時 (JST = UTC+9) のタイムゾーン定義
+JST = timezone(timedelta(hours=9))
 
 async def main():
     async with async_playwright() as p:
@@ -113,11 +116,11 @@ async def main():
 
         await browser.close()
 
-        # CSVへ保存
+        # 日本標準時（JST）でCSV保存
         if ads_data:
-            now = datetime.now()
-            today_str = now.strftime("%Y-%m-%d")
-            time_str = now.strftime("%H%M")
+            now_jst = datetime.now(JST)  # 現在時刻を日本時間で取得
+            today_str = now_jst.strftime("%Y-%m-%d")
+            time_str = now_jst.strftime("%H%M")
             
             output_dir = os.path.join("data", today_str)
             os.makedirs(output_dir, exist_ok=True)
@@ -126,7 +129,7 @@ async def main():
             
             df = pd.DataFrame(ads_data)
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
-            print(f"正常に保存完了: {file_path} ({len(ads_data)}件)")
+            print(f"正常に保存完了 (JST): {file_path} ({len(ads_data)}件)")
         else:
             print("該当する日本国内の広告データが取得できませんでした。")
 
