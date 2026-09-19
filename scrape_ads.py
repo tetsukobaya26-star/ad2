@@ -113,19 +113,16 @@ async def main():
         except Exception as e:
             print(f"ページ読み込み進行中: {e}")
 
-        # 広告カード要素または「ID:」テキストが表示されるまで最大30秒待機
         try:
             await page.wait_for_selector('div:has-text("ID:"), div[role="region"]', timeout=30000)
             print("コンテンツの読み込みを確認しました。")
         except Exception:
             print("要素の自動待機タイムアウト。そのまま代替取得とスクロールを試行します。")
 
-        # ページスクロールによりコンテンツをロード
         for _ in range(5):
             await page.evaluate("window.scrollBy(0, 1200)")
             await page.wait_for_timeout(2000)
 
-        # 汎用的なセレクターで広告カードを取得
         ad_cards = await page.query_selector_all('div:has-text("ID:")')
         if not ad_cards:
             ad_cards = await page.query_selector_all('div[role="region"]')
@@ -154,19 +151,37 @@ async def main():
                         ad_id = line.replace("ID:", "").replace("ID :", "").strip()
                         break
 
-                # 2. 広告主（ページ名）の取得
+                # 2. 広告主（ページ名）の精密抽出
                 page_name = "不明"
-                lines = [l.strip() for l in card_text.split('\n') if l.strip()]
-                for line in lines:
-                    if not line.startswith("ID:") and "アクティブ" not in line and "掲載開始日" not in line:
-                        page_name = line
-                        break
+                
+                # 方法A: 広告主のリンク（aタグ）や見出し要素から直接取得
+                header_elem = await card.query_selector('a[href*="facebook.com/"], div[role="heading"], span[class*="xt0psk2"]')
+                if header_elem:
+                    text_val = (await header_elem.inner_text()).strip()
+                    if text_val and "ID:" not in text_val and "アクティブ" not in text_val:
+                        page_name = text_val.split('\n')[0]
 
-                # 3. 広告テキスト
-                ad_text = " / ".join(lines[3:10]) if len(lines) > 3 else card_text[:200]
+                # 方法B: テキスト行からシステムテキストを除外して取得
+                if page_name == "不明":
+                    ignore_keywords = ["アクティブ", "掲載開始日", "ID:", "非アクティブ", "複数の広告", "バージョン", "プラットフォーム", "詳細を見る", "管理者"]
+                    lines = [l.strip() for l in card_text.split('\n') if l.strip()]
+                    for line in lines:
+                        if not any(k in line for k in ignore_keywords) and len(line) < 100:
+                            page_name = line
+                            break
 
-                # 4. 画像URL & ダウンロード
-                img_element = await card.query_selector('img')
+                # 3. 広告テキスト（メイン本文）
+                body_elem = await card.query_selector('div[style*="white-space: pre-wrap"]')
+                if body_elem:
+                    ad_text = (await body_elem.inner_text()).strip()
+                else:
+                    lines = [l.strip() for l in card_text.split('\n') if l.strip()]
+                    # 広告主名やメタデータ以外の部分を本文として取得
+                    filtered_lines = [l for l in lines if page_name not in l and "ID:" not in l and "掲載開始日" not in l and "アクティブ" not in l]
+                    ad_text = " / ".join(filtered_lines[:6]) if filtered_lines else card_text[:200]
+
+                # 4. 画像URL & サムネイルダウンロード
+                img_element = await card.query_selector('img[src*="fbcdn"], img[src*="scontent"], img')
                 image_url = await img_element.get_attribute("src") if img_element else "なし"
                 
                 local_img_path = "なし"
