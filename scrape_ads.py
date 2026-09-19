@@ -151,17 +151,14 @@ async def main():
                         ad_id = line.replace("ID:", "").replace("ID :", "").strip()
                         break
 
-                # 2. 広告主（ページ名）の精密抽出
+                # 2. 広告主（ページ名）の抽出
                 page_name = "不明"
-                
-                # 方法A: 広告主のリンク（aタグ）や見出し要素から直接取得
                 header_elem = await card.query_selector('a[href*="facebook.com/"], div[role="heading"], span[class*="xt0psk2"]')
                 if header_elem:
                     text_val = (await header_elem.inner_text()).strip()
                     if text_val and "ID:" not in text_val and "アクティブ" not in text_val:
                         page_name = text_val.split('\n')[0]
 
-                # 方法B: テキスト行からシステムテキストを除外して取得
                 if page_name == "不明":
                     ignore_keywords = ["アクティブ", "掲載開始日", "ID:", "非アクティブ", "複数の広告", "バージョン", "プラットフォーム", "詳細を見る", "管理者"]
                     lines = [l.strip() for l in card_text.split('\n') if l.strip()]
@@ -170,22 +167,36 @@ async def main():
                             page_name = line
                             break
 
-                # 3. 広告テキスト（メイン本文）
+                # 3. 広告テキスト
                 body_elem = await card.query_selector('div[style*="white-space: pre-wrap"]')
                 if body_elem:
                     ad_text = (await body_elem.inner_text()).strip()
                 else:
                     lines = [l.strip() for l in card_text.split('\n') if l.strip()]
-                    # 広告主名やメタデータ以外の部分を本文として取得
                     filtered_lines = [l for l in lines if page_name not in l and "ID:" not in l and "掲載開始日" not in l and "アクティブ" not in l]
                     ad_text = " / ".join(filtered_lines[:6]) if filtered_lines else card_text[:200]
 
-                # 4. 画像URL & サムネイルダウンロード
-                img_element = await card.query_selector('img[src*="fbcdn"], img[src*="scontent"], img')
-                image_url = await img_element.get_attribute("src") if img_element else "なし"
+                # 4. 広告本編のサムネイル画像URL抽出（アイコン画像の除外処理付き）
+                image_url = "なし"
+                img_elements = await card.query_selector_all('img')
                 
+                for img in img_elements:
+                    src = await img.get_attribute("src")
+                    if not src or not src.startswith("http"):
+                        continue
+
+                    # 広告主のプロフィールアイコン（丸型アイコン）や特定のメタ画像をスキップ
+                    # 共通の特徴: t39.31096-6, p60x60, 50x50 などの小さな画像パターン
+                    if "t39.31096-6" in src or "p50x50" in src or "p60x60" in src:
+                        continue
+                    
+                    # 動画広告のポスター画像または静止画広告のメイン画像を取得
+                    image_url = src
+                    break
+
+                # サムネイル画像のダウンロード処理
                 local_img_path = "なし"
-                if image_url and image_url.startswith("http"):
+                if image_url != "なし":
                     img_filename = f"{ad_id}.jpg"
                     save_target = os.path.join(img_dir, img_filename)
                     local_img_path = download_image(image_url, save_target)
