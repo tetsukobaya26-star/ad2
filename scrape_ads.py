@@ -17,19 +17,18 @@ JST = timezone(timedelta(hours=9))
 
 def download_image(url, save_path):
     """画像URLからファイルをローカルに保存する関数"""
-    if not url or url == "なし":
+    if not url or url == "なし" or not url.startswith("http"):
         return "なし"
     try:
-        # User-Agent を設定して拒否を防ぐ
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
         with urllib.request.urlopen(req, timeout=10) as response, open(save_path, 'wb') as out_file:
             out_file.write(response.read())
         return save_path
     except Exception as e:
-        print(f"画像ダウンロード失敗 ({url}): {e}")
+        print(f"画像ダウンロードスキップ ({e})")
         return "保存失敗"
 
 def export_to_google_sheets(ads_data):
@@ -53,7 +52,6 @@ def export_to_google_sheets(ads_data):
         sheet = client.open_by_key(spreadsheet_id).sheet1
 
         existing_records = sheet.get_all_values()
-        # カラムを定義（ローカル画像パス列を追加）
         headers = ["Scraped At", "Ad ID", "Page Name", "Ad Text", "Image File", "Image URL", "Link CTA/Text", "Landing Page Link"]
         
         if not existing_records:
@@ -91,10 +89,10 @@ async def main():
         )
         
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
-            viewport={"width": 1280, "height": 800}
+            viewport={"width": 1280, "height": 900}
         )
         
         page = await context.new_page()
@@ -111,21 +109,24 @@ async def main():
         print(f"アクセス中 (日本国内・完全一致): {url}")
         
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.goto(url, wait_until="networkidle", timeout=60000)
         except Exception as e:
-            print(f"ページ読み込み警告: {e}")
+            print(f"ページ読み込み進行中: {e}")
 
+        # 広告カード要素または「ID:」テキストが表示されるまで最大30秒待機
         try:
-            await page.wait_for_selector('div[role="region"], div[class*="xh8ye4b"]', timeout=15000)
+            await page.wait_for_selector('div:has-text("ID:"), div[role="region"]', timeout=30000)
+            print("コンテンツの読み込みを確認しました。")
         except Exception:
-            print("要素の読み込みタイムアウト。そのままスクロール処理を実行します。")
+            print("要素の自動待機タイムアウト。そのまま代替取得とスクロールを試行します。")
 
-        for _ in range(4):
-            await page.evaluate("window.scrollBy(0, 1500)")
-            await page.wait_for_timeout(2500)
+        # ページスクロールによりコンテンツをロード
+        for _ in range(5):
+            await page.evaluate("window.scrollBy(0, 1200)")
+            await page.wait_for_timeout(2000)
 
-        # 広告カードの抽出
-        ad_cards = await page.query_selector_all('div[class*="xh8ye4b"]')
+        # 汎用的なセレクターで広告カードを取得
+        ad_cards = await page.query_selector_all('div:has-text("ID:")')
         if not ad_cards:
             ad_cards = await page.query_selector_all('div[role="region"]')
 
@@ -134,7 +135,6 @@ async def main():
         now_jst = datetime.now(JST)
         today_str = now_jst.strftime("%Y-%m-%d")
         
-        # 保存先フォルダ準備 (data/YYYY-MM-DD/images/)
         output_dir = os.path.join("data", today_str)
         img_dir = os.path.join(output_dir, "images")
         os.makedirs(img_dir, exist_ok=True)
@@ -144,10 +144,10 @@ async def main():
         for idx, card in enumerate(ad_cards):
             try:
                 card_text = await card.inner_text()
-                if not card_text.strip():
+                if not card_text.strip() or len(card_text) < 20:
                     continue
 
-                # 1. 広告IDの特定
+                # 1. 広告IDの抽出
                 ad_id = f"unknown_{idx}"
                 for line in card_text.split('\n'):
                     if "ID:" in line or "ID :" in line:
@@ -155,39 +155,33 @@ async def main():
                         break
 
                 # 2. 広告主（ページ名）の取得
-                page_name_elem = await card.query_selector('a[href*="facebook.com/"], span[class*="xt0psk2"]')
-                if page_name_elem:
-                    page_name = (await page_name_elem.inner_text()).strip()
-                else:
-                    lines = [l.strip() for l in card_text.split('\n') if l.strip()]
-                    page_name = lines[0] if lines else "不明"
+                page_name = "不明"
+                lines = [l.strip() for l in card_text.split('\n') if l.strip()]
+                for line in lines:
+                    if not line.startswith("ID:") and "アクティブ" not in line and "掲載開始日" not in line:
+                        page_name = line
+                        break
 
-                # 3. 広告テキスト（メイン文章）
-                body_elem = await card.query_selector('div[style*="white-space: pre-wrap"]')
-                if body_elem:
-                    ad_text = (await body_elem.inner_text()).strip()
-                else:
-                    lines = [l.strip() for l in card_text.split('\n') if l.strip()]
-                    ad_text = " / ".join(lines[2:8]) if len(lines) > 2 else card_text[:100]
+                # 3. 広告テキスト
+                ad_text = " / ".join(lines[3:10]) if len(lines) > 3 else card_text[:200]
 
-                # 4. 画像URL抽出 ＆ サムネイルのダウンロード保存
-                img_element = await card.query_selector('img[src*="fbcdn"], img[src*="scontent"]')
+                # 4. 画像URL & ダウンロード
+                img_element = await card.query_selector('img')
                 image_url = await img_element.get_attribute("src") if img_element else "なし"
                 
                 local_img_path = "なし"
-                if image_url != "なし":
-                    # 画像の保存ファイル名 (例: data/2026-09-19/images/123456789.jpg)
+                if image_url and image_url.startswith("http"):
                     img_filename = f"{ad_id}.jpg"
                     save_target = os.path.join(img_dir, img_filename)
                     local_img_path = download_image(image_url, save_target)
 
-                # 5. リンク表示文言（CTAボタン等）
+                # 5. リンク表示文言 (CTA)
                 cta_text = "なし"
                 cta_elem = await card.query_selector('div[role="button"], a[role="button"]')
                 if cta_elem:
                     cta_text = (await cta_elem.inner_text()).strip()
 
-                # 6. 最終リンク先（LPの実際のURL）
+                # 6. 最終リンク先 (LP)
                 link_url = "なし"
                 links = await card.query_selector_all('a[href]')
                 for link in links:
@@ -212,7 +206,7 @@ async def main():
                     "Landing Page Link": link_url
                 })
 
-            except Exception:
+            except Exception as e:
                 continue
 
         await browser.close()
