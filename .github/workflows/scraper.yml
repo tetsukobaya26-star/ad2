@@ -25,10 +25,13 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install playwright pandas
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install playwright pandas gspread google-auth; fi
         playwright install chromium --with-deps
 
     - name: Run Playwright script
+      env:
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       run: python scrape_ads.py
 
     - name: Commit and Push retrieved CSV
