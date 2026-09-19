@@ -1,11 +1,16 @@
 name: Meta Ads Playwright Scraper
 
 on:
-  schedule:
-    # 毎時0分（1時間ごと）に自動実行
-    - cron: '32 * * * *'
-  workflow_dispatch: # 手動実行ボタン
+  # 外部（GAS等）からのWebフック通知で起動
+  repository_dispatch:
+    types: [run-scraper]
 
+  # 手動実行ボタンを残す
+  workflow_dispatch:
+
+  # （任意）既存のcronも残しておく場合
+  schedule:
+    - cron: '00 * * * *'
 jobs:
   scrape:
     runs-on: ubuntu-latest
