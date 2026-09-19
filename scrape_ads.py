@@ -168,7 +168,7 @@ async def main():
 
         await browser.close()
 
-        # 1. 日本標準時（JST）で従来通り CSV にも保存
+        # 1. 日本標準時（JST）で従来通り CSV に保存
         if ads_data:
             now_jst = datetime.now(JST)  # 現在時刻を日本時間で取得
             today_str = now_jst.strftime("%Y-%m-%d")
@@ -177,13 +177,13 @@ async def main():
             output_dir = os.path.join("data", today_str)
             os.makedirs(output_dir, exist_ok=True)
 
-            file_path = os.path.join("output_dir", f"meta_ads_{time_str}.csv")
+            file_path = os.path.join(output_dir, f"meta_ads_{time_str}.csv")
             
             df = pd.DataFrame(ads_data)
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
             print(f"正常に保存完了 (JST): {file_path} ({len(ads_data)}件)")
 
-            # 2. 追加: Google スプレッドシートへエクスポート
+            # 2. Google スプレッドシートへエクスポート
             export_to_google_sheets(ads_data)
 
         else:
