@@ -1,15 +1,67 @@
 import asyncio
 import os
+import json
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 from playwright.async_api import async_playwright
+import gspread
+from google.oauth2.service_account import Credentials
 
 KEYWORD = "Tiktok18"
 COUNTRY = "JP"
 
 # 日本標準時 (JST = UTC+9) のタイムゾーン定義
 JST = timezone(timedelta(hours=9))
+
+def export_to_google_sheets(ads_data):
+    """Google スプレッドシートにデータを追加する関数"""
+    sa_key_str = os.environ.get('GCP_SA_KEY')
+    spreadsheet_id = os.environ.get('SPREADSHEET_ID')
+
+    if not sa_key_str or not spreadsheet_id:
+        print("環境変数 GCP_SA_KEY または SPREADSHEET_ID が設定されていないため、スプレッドシート出力をスキップします。")
+        return
+
+    try:
+        # 認証情報の読み込み
+        key_data = json.loads(sa_key_str)
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        creds = Credentials.from_service_account_info(key_data, scopes=scopes)
+        client = gspread.authorize(creds)
+
+        # スプレッドシートを開く
+        sheet = client.open_by_key(spreadsheet_id).sheet1
+
+        # 1行目が空（ヘッダーがない）場合はヘッダーを追加
+        existing_records = sheet.get_all_values()
+        if not existing_records:
+            headers = ["Scraped At", "Country", "Page Name", "Ad ID / Details", "Image URL", "Landing Page Link", "Full Text"]
+            sheet.append_row(headers)
+
+        # 追記用データのフォーマット作成（取得日時の列を追加）
+        now_jst_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        rows_to_append = []
+        for item in ads_data:
+            rows_to_append.append([
+                now_jst_str,
+                item.get("Country", ""),
+                item.get("Page Name", ""),
+                item.get("Ad ID / Details", ""),
+                item.get("Image URL", ""),
+                item.get("Landing Page Link", ""),
+                item.get("Full Text", "")
+            ])
+
+        # スプレッドシートへ一括追加
+        sheet.append_rows(rows_to_append)
+        print(f"Google スプレッドシートに {len(rows_to_append)} 件のデータを追加しました。")
+
+    except Exception as e:
+        print(f"Google スプレッドシートへの書き込み中にエラーが発生しました: {e}")
 
 async def main():
     async with async_playwright() as p:
@@ -116,7 +168,7 @@ async def main():
 
         await browser.close()
 
-        # 日本標準時（JST）でCSV保存
+        # 1. 日本標準時（JST）で従来通り CSV にも保存
         if ads_data:
             now_jst = datetime.now(JST)  # 現在時刻を日本時間で取得
             today_str = now_jst.strftime("%Y-%m-%d")
@@ -125,11 +177,15 @@ async def main():
             output_dir = os.path.join("data", today_str)
             os.makedirs(output_dir, exist_ok=True)
 
-            file_path = os.path.join(output_dir, f"meta_ads_{time_str}.csv")
+            file_path = os.path.join("output_dir", f"meta_ads_{time_str}.csv")
             
             df = pd.DataFrame(ads_data)
             df.to_csv(file_path, index=False, encoding="utf-8-sig")
             print(f"正常に保存完了 (JST): {file_path} ({len(ads_data)}件)")
+
+            # 2. 追加: Google スプレッドシートへエクスポート
+            export_to_google_sheets(ads_data)
+
         else:
             print("該当する日本国内の広告データが取得できませんでした。")
 
