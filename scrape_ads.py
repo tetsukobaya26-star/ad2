@@ -24,12 +24,31 @@ def download_image(url, save_path):
             url, 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
-        with urllib.request.urlopen(req, timeout=10) as response, open(save_path, 'wb') as out_file:
+        with urllib.request.urlopen(req, timeout=15) as response, open(save_path, 'wb') as out_file:
             out_file.write(response.read())
+        print(f"  [画像保存成功]: {save_path}")
         return save_path
     except Exception as e:
-        print(f"画像ダウンロードスキップ ({e})")
+        print(f"  [画像保存エラー] ({url[:50]}...): {e}")
         return "保存失敗"
+
+def is_profile_icon(src_url):
+    """URLパターンから広告主のプロフィールアイコン（サムネイル）かどうか判定する"""
+    if not src_url or not src_url.startswith("http"):
+        return True
+    
+    # Metaのページアイコンや小さなプロフィール画像によく含まれるURLキーワード
+    icon_patterns = [
+        "p50x50", "p60x60", "p100x100", "p160x160", "p200x200", "p300x300",
+        "t39.30808-1", "t39.31096-6", "s100x100", "s160x160", "s300x300",
+        "_n.jpg?_nc_cat=", "profile"
+    ]
+    
+    src_lower = src_url.lower()
+    for pattern in icon_patterns:
+        if pattern in src_lower:
+            return True
+    return False
 
 def export_to_google_sheets(ads_data):
     """Google スプレッドシートにデータを追加する関数"""
@@ -176,25 +195,54 @@ async def main():
                     filtered_lines = [l for l in lines if page_name not in l and "ID:" not in l and "掲載開始日" not in l and "アクティブ" not in l]
                     ad_text = " / ".join(filtered_lines[:6]) if filtered_lines else card_text[:200]
 
-                # 4. 広告本編のサムネイル画像URL抽出（アイコン画像の除外処理付き）
+                # 4. 広告本編のクリエイティブ画像の取得（精密ロジック）
                 image_url = "なし"
-                img_elements = await card.query_selector_all('img')
-                
-                for img in img_elements:
-                    src = await img.get_attribute("src")
-                    if not src or not src.startswith("http"):
-                        continue
 
-                    # 広告主のプロフィールアイコン（丸型アイコン）や特定のメタ画像をスキップ
-                    # 共通の特徴: t39.31096-6, p60x60, 50x50 などの小さな画像パターン
-                    if "t39.31096-6" in src or "p50x50" in src or "p60x60" in src:
-                        continue
-                    
-                    # 動画広告のポスター画像または静止画広告のメイン画像を取得
-                    image_url = src
-                    break
+                # 判定対象となるコンテキスト（カード内、またはカード内のiframe内）
+                target_elements = [card]
+                iframe_elem = await card.query_selector('iframe')
+                if iframe_elem:
+                    frame = await iframe_elem.content_frame()
+                    if frame:
+                        target_elements.append(frame)
 
-                # サムネイル画像のダウンロード処理
+                for elem in target_elements:
+                    # 優先度A: 動画のposter画像
+                    video_elem = await elem.query_selector('video')
+                    if video_elem:
+                        poster = await video_elem.get_attribute("poster")
+                        if poster and poster.startswith("http") and not is_profile_icon(poster):
+                            image_url = poster
+                            break
+
+                    # 優先度B: クリエイティブ専用領域内のimgタグ
+                    # Meta広告ライブラリでは、クリエイティブ画像は特定クラスやalt属性を持つことが多い
+                    img_elements = await elem.query_selector_all('img')
+                    candidate_imgs = []
+
+                    for img in img_elements:
+                        src = await img.get_attribute("src")
+                        alt = await img.get_attribute("alt") or ""
+                        
+                        if not src or not src.startswith("http"):
+                            continue
+
+                        # アイコン判定関数で弾く
+                        if is_profile_icon(src):
+                            continue
+
+                        # altにページ名が含まれている場合はプロフィール画像の可能性が高いのでスキップ
+                        if page_name != "不明" and page_name in alt:
+                            continue
+
+                        candidate_imgs.append(src)
+
+                    if candidate_imgs:
+                        # 候補のうち最も下部（または複数ある場合はクリエイティブ画像）を採用
+                        image_url = candidate_imgs[0]
+                        break
+
+                # サムネイル画像のダウンロード実行
                 local_img_path = "なし"
                 if image_url != "なし":
                     img_filename = f"{ad_id}.jpg"
@@ -233,6 +281,7 @@ async def main():
                 })
 
             except Exception as e:
+                print(f"カード解析エラー (要素 {idx}): {e}")
                 continue
 
         await browser.close()
