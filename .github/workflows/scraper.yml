@@ -15,10 +15,10 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
 
@@ -35,6 +35,16 @@ jobs:
       run: python scrape_ads.py
 
     - name: Commit and Push retrieved CSV
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/
+        if ! git diff --staged --quiet; then
+          git commit -m "Auto-update: Scraped Meta ads data [skip ci]"
+          git push
+        else
+          echo "No changes to commit."
+        fi    - name: Commit and Push retrieved CSV
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
