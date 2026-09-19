@@ -1,16 +1,13 @@
 name: Meta Ads Playwright Scraper
 
 on:
-  # 外部（GAS等）からのWebフック通知で起動
-  repository_dispatch:
-    types: [run-scraper]
+  # 1時間ごとに自動実行 (UTC時間)
+  schedule:
+    - cron: '0 * * * *'
 
-  # 手動実行ボタンを残す
+  # GitHub画面からの手動実行ボタン
   workflow_dispatch:
 
-  # （任意）既存のcronも残しておく場合
-  schedule:
-    - cron: '00 * * * *'
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -19,34 +16,31 @@ jobs:
       contents: write
 
     steps:
-    - name: Check out repository
-      uses: actions/checkout@v5
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install playwright pandas gspread google-auth; fi
-        playwright install chromium --with-deps
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install playwright pandas; fi
+          playwright install chromium --with-deps
 
-    - name: Run Playwright script
-      env:
-        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-      run: python scrape_ads.py
+      - name: Run Playwright script
+        run: python scrape_ads.py
 
-    - name: Commit and Push retrieved CSV
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add data/
-        if ! git diff --staged --quiet; then
-          git commit -m "Auto-update: Scraped Meta ads data [skip ci]"
-          git push
-        else
-          echo "No changes to commit."
-        fi
+      - name: Commit and Push retrieved CSV
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-update: Scraped Meta ads data [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
