@@ -37,7 +37,6 @@ def is_profile_icon(src_url):
     if not src_url or not src_url.startswith("http"):
         return True
     
-    # Metaのページアイコンや小さなプロフィール画像によく含まれるURLキーワード
     icon_patterns = [
         "p50x50", "p60x60", "p100x100", "p160x160", "p200x200", "p300x300",
         "t39.30808-1", "t39.31096-6", "s100x100", "s160x160", "s300x300",
@@ -150,6 +149,7 @@ async def main():
 
         now_jst = datetime.now(JST)
         today_str = now_jst.strftime("%Y-%m-%d")
+        time_str = now_jst.strftime("%H%M") # ファイル上書き防止用の時刻文字列
         
         output_dir = os.path.join("data", today_str)
         img_dir = os.path.join(output_dir, "images")
@@ -195,10 +195,9 @@ async def main():
                     filtered_lines = [l for l in lines if page_name not in l and "ID:" not in l and "掲載開始日" not in l and "アクティブ" not in l]
                     ad_text = " / ".join(filtered_lines[:6]) if filtered_lines else card_text[:200]
 
-                # 4. 広告本編のクリエイティブ画像の取得（精密ロジック）
+                # 4. 広告本編のクリエイティブ画像の取得
                 image_url = "なし"
 
-                # 判定対象となるコンテキスト（カード内、またはカード内のiframe内）
                 target_elements = [card]
                 iframe_elem = await card.query_selector('iframe')
                 if iframe_elem:
@@ -216,7 +215,6 @@ async def main():
                             break
 
                     # 優先度B: クリエイティブ専用領域内のimgタグ
-                    # Meta広告ライブラリでは、クリエイティブ画像は特定クラスやalt属性を持つことが多い
                     img_elements = await elem.query_selector_all('img')
                     candidate_imgs = []
 
@@ -227,25 +225,22 @@ async def main():
                         if not src or not src.startswith("http"):
                             continue
 
-                        # アイコン判定関数で弾く
                         if is_profile_icon(src):
                             continue
 
-                        # altにページ名が含まれている場合はプロフィール画像の可能性が高いのでスキップ
                         if page_name != "不明" and page_name in alt:
                             continue
 
                         candidate_imgs.append(src)
 
                     if candidate_imgs:
-                        # 候補のうち最も下部（または複数ある場合はクリエイティブ画像）を採用
                         image_url = candidate_imgs[0]
                         break
 
-                # サムネイル画像のダウンロード実行
+                # サムネイル画像のダウンロード実行（ファイル名に時刻を付与して上書きを防止）
                 local_img_path = "なし"
                 if image_url != "なし":
-                    img_filename = f"{ad_id}.jpg"
+                    img_filename = f"{ad_id}_{time_str}.jpg"
                     save_target = os.path.join(img_dir, img_filename)
                     local_img_path = download_image(image_url, save_target)
 
@@ -287,7 +282,6 @@ async def main():
         await browser.close()
 
         if ads_data:
-            time_str = now_jst.strftime("%H%M")
             file_path = os.path.join(output_dir, f"meta_ads_{time_str}.csv")
             
             df = pd.DataFrame(ads_data)
